@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Public Companies Near Me</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<style>
+  html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
+  #map { position: absolute; inset: 0; }
+  #panel {
+    position: absolute; z-index: 1000; top: 12px; left: 12px;
+    background: #fff; padding: 14px 16px; border-radius: 10px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.25); width: 260px;
+    max-height: calc(100vh - 24px); overflow-y: auto;
+  }
+  #panel h1 { font-size: 15px; margin: 0 0 8px; }
+  #panel label { font-size: 13px; display:block; margin-top: 8px; }
+  #exchanges { margin-top: 8px; }
+  #exchanges label { display: inline-block; margin: 2px 10px 0 0; font-size: 12px; }
+  #exchanges input { vertical-align: middle; }
+  #mcap { margin-top: 4px; }
+  #mcap label { display: inline-block; margin: 2px 10px 0 0; font-size: 12px; }
+  #mcap input { vertical-align: middle; }
+  #industry { margin-top: 4px; }
+  #industry label { display: inline-block; margin: 2px 10px 0 0; font-size: 12px; }
+  #industry input { vertical-align: middle; }
+  .toggleAll { font-size: 11px; color: #2563eb; cursor: pointer; margin-left: 6px; }
+  .toggleAll:hover { text-decoration: underline; }
+  #unkRow { font-size: 12px; }
+  #unkRow input { vertical-align: middle; }
+  #radiusVal { font-weight: 600; }
+  #count { margin-top: 10px; font-size: 13px; }
+  #count b { font-size: 18px; }
+  button { margin-top: 10px; width: 100%; padding: 7px; border: 0;
+    background: #2563eb; color: #fff; border-radius: 7px; cursor: pointer; font-size: 13px; }
+  button:hover { background: #1d4ed8; }
+  .hint { font-size: 11px; color: #666; margin-top: 8px; line-height: 1.4; }
+  input[type=range] { width: 100%; }
+  #addrRow { display: flex; gap: 6px; margin-top: 4px; }
+  #address { flex: 1; padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; min-width: 0; }
+  #addrRow button { margin-top: 0; width: auto; padding: 6px 12px; }
+  #locate { background: #fff; color: #2563eb; border: 1px solid #2563eb; }
+  #locate:hover { background: #eff6ff; }
+  #checkedRow { font-size: 12px; margin-top: 8px; }
+  #checkedRow input { vertical-align: middle; }
+  #checkedCount { font-weight: 600; }
+  #clearChecked { width: auto; margin-top: 6px; padding: 3px 8px; font-size: 11px;
+    background: #fff; color: #b91c1c; border: 1px solid #b91c1c; }
+  #clearChecked:hover { background: #fef2f2; }
+  .chk { margin-top: 8px; width: 100%; padding: 6px; border: 1px solid #16a34a;
+    background: #fff; color: #16a34a; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; }
+  .chk:hover { background: #f0fdf4; }
+  .chk.on { background: #16a34a; color: #fff; border-color: #15803d; }
+  .chk.on:hover { background: #15803d; }
+  #companySearch { width: 100%; box-sizing: border-box; padding: 6px 8px;
+    border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
+  #searchResults { border: 1px solid #e5e7eb; border-radius: 6px; margin-top: 4px;
+    max-height: 240px; overflow-y: auto; }
+  #searchResults div { padding: 6px 8px; font-size: 12px; cursor: pointer;
+    border-top: 1px solid #f0f0f0; }
+  #searchResults div:first-child { border-top: 0; }
+  #searchResults div:hover, #searchResults div.active { background: #eff6ff; }
+  #searchResults .tk { font-weight: 600; color: #2563eb; }
+  #searchResults .meta { color: #666; }
+  .hidden { display: none; }
+  #panel h1 { padding-right: 28px; }
+  #hidePanel { position: absolute; top: 12px; right: 12px; width: 26px; height: 26px;
+    margin: 0; padding: 0; background: #fff; color: #666; border: 1px solid #ddd;
+    border-radius: 6px; font-size: 15px; line-height: 1; cursor: pointer; }
+  #hidePanel:hover { background: #f3f4f6; color: #111; }
+  #showPanel { position: absolute; z-index: 1000; top: 12px; left: 12px; width: auto;
+    margin: 0; padding: 8px 12px; background: #2563eb; color: #fff; border: 0;
+    border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,.25); cursor: pointer; font-size: 13px; }
+  #showPanel:hover { background: #1d4ed8; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel">
+  <button id="hidePanel" title="Hide panel">&#10005;</button>
+  <h1>Public companies near me</h1>
+  <label for="companySearch">Find a company by name or ticker</label>
+  <div id="searchWrap">
+    <input type="text" id="companySearch" placeholder="e.g. NVDA or Nvidia" autocomplete="off" />
+    <div id="searchResults" class="hidden"></div>
+  </div>
+  <label for="address">Address, city, or ZIP</label>
+  <div id="addrRow">
+    <input type="text" id="address" placeholder="e.g. 1600 Amphitheatre Pkwy, CA" />
+    <button id="search">Go</button>
+  </div>
+  <label>Radius: <span id="radiusVal">200</span> miles</label>
+  <input type="range" id="radius" min="1" max="200" value="200" />
+  <div id="exchanges">
+    <label><input type="checkbox" class="ex" value="NYSE" checked> NYSE</label>
+    <label><input type="checkbox" class="ex" value="Nasdaq" checked> Nasdaq</label>
+    <label><input type="checkbox" class="ex" value="OTC" checked> OTC</label>
+    <label><input type="checkbox" class="ex" value="other" checked> Other</label>
+  </div>
+  <label>Market cap</label>
+  <div id="mcap">
+    <label><input type="checkbox" class="cap" value="u50" checked> Under $50M</label>
+    <label><input type="checkbox" class="cap" value="50_300" checked> $50M&ndash;$300M</label>
+    <label><input type="checkbox" class="cap" value="300_1b" checked> $300M&ndash;$1B</label>
+    <label><input type="checkbox" class="cap" value="1b_2b" checked> $1B&ndash;$2B</label>
+    <label><input type="checkbox" class="cap" value="2b_10b" checked> $2B&ndash;$10B</label>
+    <label><input type="checkbox" class="cap" value="10b" checked> $10B+</label>
+  </div>
+  <label id="unkRow"><input type="checkbox" id="includeUnknown" checked> Include companies with no cap data</label>
+  <label>Industry <span class="toggleAll" id="indAll">all</span><span class="toggleAll" id="indNone">none</span></label>
+  <div id="industry">
+    <label><input type="checkbox" class="ind" value="Technology" checked> Technology</label>
+    <label><input type="checkbox" class="ind" value="Healthcare & Biotech" checked> Healthcare &amp; Biotech</label>
+    <label><input type="checkbox" class="ind" value="Financials" checked> Financials</label>
+    <label><input type="checkbox" class="ind" value="Real Estate / REITs" checked> Real Estate / REITs</label>
+    <label><input type="checkbox" class="ind" value="Energy" checked> Energy</label>
+    <label><input type="checkbox" class="ind" value="Industrials & Manufacturing" checked> Industrials &amp; Mfg</label>
+    <label><input type="checkbox" class="ind" value="Materials & Mining" checked> Materials &amp; Mining</label>
+    <label><input type="checkbox" class="ind" value="Consumer" checked> Consumer</label>
+    <label><input type="checkbox" class="ind" value="Media & Telecom" checked> Media &amp; Telecom</label>
+    <label><input type="checkbox" class="ind" value="Utilities" checked> Utilities</label>
+    <label><input type="checkbox" class="ind" value="Transportation & Logistics" checked> Transport &amp; Logistics</label>
+    <label><input type="checkbox" class="ind" value="Other / Shell / Diversified" checked> Other / Shell</label>
+  </div>
+  <label id="indUnkRow" style="font-size:12px"><input type="checkbox" id="includeUnknownInd" checked> Include companies with no industry data</label>
+  <label id="checkedRow"><input type="checkbox" id="hideChecked"> Hide ones I've looked into (<span id="checkedCount">0</span> marked)</label>
+  <button id="clearChecked">Reset my checkmarks</button>
+  <button id="locate">Use my location</button>
+  <div id="count">Loading company data…</div>
+  <div class="hint">Type an address and press Go, click "Use my location", or click anywhere on the map to set your center point.</div>
+</div>
+<button id="showPanel" class="hidden" title="Show panel">&#9776; Panel</button>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="data/companies.js"></script>
+<script>
+const MILES_PER_KM = 0.621371;
+let companies = [];
+let center = null;            // {lat, lon}
+let circle = null;
+let markerLayer = L.markerClusterGroup({ chunkedLoading: true });
+
+// --- "Looked into" checkmarks (persisted in this browser) ---
+const idOf = c => (c.ticker ? 'T:' + c.ticker : 'N:' + c.name);
+let checked = new Set();
+try { checked = new Set(JSON.parse(localStorage.getItem('checkedCompanies') || '[]')); } catch (e) {}
+const markerByIdx = {};   // company index -> marker, rebuilt each render
+function saveChecked() { localStorage.setItem('checkedCompanies', JSON.stringify([...checked])); }
+function updateCheckedCount() { document.getElementById('checkedCount').textContent = checked.size; }
+
+const blueIcon = new L.Icon.Default();
+const greenIcon = new L.Icon({
+  iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-green.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+});
+const redIcon = new L.Icon({
+  iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-red.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+});
+
+// Shared popup body for both the radius markers and the company-search pin.
+function popupHtml(c, extra) {
+  const exLabel = c.exchange ? ` &middot; ${c.exchange}` : '';
+  const capLabel = c.mcap != null ? `<br>Market cap: ${fmtCap(c.mcap)}` : '';
+  const secLabel = c.sector ? `<br><span style="color:#444">${c.sector}</span>` : '';
+  return `<b>${c.name}</b><br>${c.ticker ? c.ticker : ''}${exLabel}` +
+    `<br>${c.city}, ${c.state}${secLabel}${capLabel}` +
+    (extra || '') + chkBtnHtml(c);
+}
+
+function chkBtnHtml(c) {
+  const on = checked.has(idOf(c));
+  return `<button class="chk ${on ? 'on' : ''}" id="chk-${c._i}" onclick="toggleChecked(${c._i})">` +
+    `${on ? '✓ Looked into — click to undo' : 'Mark as looked into'}</button>`;
+}
+
+window.toggleChecked = function (idx) {
+  const c = companies[idx];
+  const id = idOf(c);
+  if (checked.has(id)) checked.delete(id); else checked.add(id);
+  saveChecked();
+  updateCheckedCount();
+  const m = markerByIdx[idx];
+  if (m) m.setIcon(checked.has(id) ? greenIcon : blueIcon);
+  const btn = document.getElementById('chk-' + idx);
+  if (btn) {
+    const on = checked.has(id);
+    btn.className = 'chk ' + (on ? 'on' : '');
+    btn.textContent = on ? '✓ Looked into — click to undo' : 'Mark as looked into';
+  }
+  // if "hide looked into" is on, refresh so the marker drops off
+  if (document.getElementById('hideChecked').checked) render();
+};
+
+const map = L.map('map').setView([39.5, -98.35], 4); // continental US
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+markerLayer.addTo(map);
+
+function haversineMiles(aLat, aLon, bLat, bLon) {
+  const R = 6371; // km
+  const dLat = (bLat - aLat) * Math.PI / 180;
+  const dLon = (bLon - aLon) * Math.PI / 180;
+  const s = Math.sin(dLat/2)**2 +
+    Math.cos(aLat*Math.PI/180) * Math.cos(bLat*Math.PI/180) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1-s)) * MILES_PER_KM;
+}
+
+function render() {
+  const radius = +document.getElementById('radius').value;
+  document.getElementById('radiusVal').textContent = radius;
+  if (!center) {
+    document.getElementById('count').innerHTML =
+      `Set a location to search. <b>${companies.length}</b> companies loaded.`;
+    return;
+  }
+  markerLayer.clearLayers();
+  if (circle) map.removeLayer(circle);
+  circle = L.circle([center.lat, center.lon], {
+    radius: radius / MILES_PER_KM * 1000, color: '#2563eb', weight: 1, fillOpacity: 0.05
+  }).addTo(map);
+
+  const allowed = new Set(
+    [...document.querySelectorAll('.ex:checked')].map(e => e.value)
+  );
+  const exOK = c => {
+    const e = c.exchange;
+    if (e === 'NYSE' || e === 'Nasdaq' || e === 'OTC') return allowed.has(e);
+    return allowed.has('other'); // CBOE, blank, anything else
+  };
+  const capRanges = [...document.querySelectorAll('.cap:checked')].map(e => e.value);
+  const includeUnknown = document.getElementById('includeUnknown').checked;
+  const inBucket = (v, b) => {
+    switch (b) {
+      case 'u50':    return v < 50e6;
+      case '50_300': return v >= 50e6 && v < 300e6;
+      case '300_1b': return v >= 300e6 && v < 1e9;
+      case '1b_2b':  return v >= 1e9 && v < 2e9;
+      case '2b_10b': return v >= 2e9 && v < 10e9;
+      case '10b':    return v >= 10e9;
+    }
+    return false;
+  };
+  const capOK = c => {
+    if (c.mcap == null) return includeUnknown;
+    return capRanges.some(b => inBucket(c.mcap, b));
+  };
+  const indAllowed = new Set([...document.querySelectorAll('.ind:checked')].map(e => e.value));
+  const includeUnknownInd = document.getElementById('includeUnknownInd').checked;
+  const indOK = c => {
+    if (!c.sector) return includeUnknownInd;
+    return indAllowed.has(c.sector);
+  };
+  const hideChecked = document.getElementById('hideChecked').checked;
+
+  for (const k in markerByIdx) delete markerByIdx[k];
+  const hits = [];
+  for (const c of companies) {
+    if (!exOK(c) || !capOK(c) || !indOK(c)) continue;
+    if (hideChecked && checked.has(idOf(c))) continue;
+    const d = haversineMiles(center.lat, center.lon, c.lat, c.lon);
+    if (d <= radius) hits.push([d, c]);
+  }
+  hits.sort((a,b) => a[0]-b[0]);
+  const locNote = { zip: '', city: ' (city-level)', state: ' (state-level)', country: ' (country-level)', geocoded: ' (approx)' };
+  let nChecked = 0;
+  for (const [d, c] of hits) {
+    const approx = locNote[c.loc] || '';
+    const isOn = checked.has(idOf(c));
+    if (isOn) nChecked++;
+    const distLine = `<br><span style="color:#666">${d.toFixed(1)} mi away${approx}</span>`;
+    const m = L.marker([c.lat, c.lon], { icon: isOn ? greenIcon : blueIcon })
+      .addTo(markerLayer).bindPopup(popupHtml(c, distLine));
+    markerByIdx[c._i] = m;
+  }
+  const checkedNote = nChecked ? ` &middot; <span style="color:#16a34a">${nChecked} looked into</span>` : '';
+  document.getElementById('count').innerHTML =
+    `<b>${hits.length}</b> public companies within ${radius} mi${checkedNote}`;
+}
+
+function fmtCap(v) {
+  if (v >= 1e12) return '$' + (v/1e12).toFixed(2) + 'T';
+  if (v >= 1e9) return '$' + (v/1e9).toFixed(2) + 'B';
+  if (v >= 1e6) return '$' + (v/1e6).toFixed(1) + 'M';
+  return '$' + v.toLocaleString();
+}
+
+function setCenter(lat, lon, zoom) {
+  center = { lat, lon };
+  if (zoom) map.setView([lat, lon], zoom);
+  render();
+}
+
+function setStatus(msg) { document.getElementById('count').innerHTML = msg; }
+
+async function geocode(query) {
+  const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q='
+    + encodeURIComponent(query);
+  const r = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+  const data = await r.json();
+  if (!data.length) return null;
+  return { lat: +data[0].lat, lon: +data[0].lon };
+}
+
+async function doSearch() {
+  const q = document.getElementById('address').value.trim();
+  if (!q) { document.getElementById('address').focus(); return; }
+  setStatus('Looking up address…');
+  try {
+    const loc = await geocode(q);
+    if (!loc) { setStatus('Address not found. Try adding a city or state.'); return; }
+    setCenter(loc.lat, loc.lon, 9);
+  } catch (e) {
+    setStatus('Address lookup failed (network/CORS). Click the map instead.');
+  }
+}
+
+document.getElementById('radius').addEventListener('input', render);
+document.querySelectorAll('.ex').forEach(e => e.addEventListener('change', render));
+document.querySelectorAll('.cap').forEach(e => e.addEventListener('change', render));
+document.getElementById('includeUnknown').addEventListener('change', render);
+document.querySelectorAll('.ind').forEach(e => e.addEventListener('change', render));
+document.getElementById('includeUnknownInd').addEventListener('change', render);
+document.getElementById('indAll').addEventListener('click', () => {
+  document.querySelectorAll('.ind').forEach(e => e.checked = true);
+  document.getElementById('includeUnknownInd').checked = true;
+  render();
+});
+document.getElementById('indNone').addEventListener('click', () => {
+  document.querySelectorAll('.ind').forEach(e => e.checked = false);
+  document.getElementById('includeUnknownInd').checked = false;
+  render();
+});
+document.getElementById('hideChecked').addEventListener('change', render);
+document.getElementById('clearChecked').addEventListener('click', () => {
+  if (!checked.size) return;
+  if (!confirm(`Clear all ${checked.size} checkmarks? This can't be undone.`)) return;
+  checked.clear();
+  saveChecked();
+  updateCheckedCount();
+  render();
+});
+map.on('click', e => setCenter(e.latlng.lat, e.latlng.lng));
+document.getElementById('search').addEventListener('click', doSearch);
+document.getElementById('address').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch();
+});
+document.getElementById('locate').addEventListener('click', () => {
+  if (!navigator.geolocation) { setStatus('Geolocation unavailable. Type an address above.'); return; }
+  if (!window.isSecureContext) {
+    setStatus('Location needs https or localhost. Type an address above instead.');
+    return;
+  }
+  setStatus('Getting your location…');
+  navigator.geolocation.getCurrentPosition(
+    p => setCenter(p.coords.latitude, p.coords.longitude, 9),
+    err => setStatus('Location blocked (' + err.message + '). Type an address above.')
+  );
+});
+
+// --- Company search (by name or ticker) ---
+let searchMarker = null;
+
+function searchCompanies(q) {
+  q = q.trim().toLowerCase();
+  if (!q) return [];
+  const res = [];
+  for (const c of companies) {
+    const tk = (c.ticker || '').toLowerCase();
+    const nm = (c.name || '').toLowerCase();
+    let score = -1;
+    if (tk && tk === q) score = 0;            // exact ticker
+    else if (tk && tk.startsWith(q)) score = 1; // ticker prefix
+    else if (nm.startsWith(q)) score = 2;       // name prefix
+    else if (tk && tk.includes(q)) score = 3;   // ticker contains
+    else if (nm.includes(q)) score = 4;         // name contains
+    if (score >= 0) res.push([score, c]);
+  }
+  // best match first, then biggest company as a tiebreaker
+  res.sort((a, b) => a[0] - b[0] || (b[1].mcap || 0) - (a[1].mcap || 0));
+  return res.slice(0, 8).map(r => r[1]);
+}
+
+function renderResults(list) {
+  const box = document.getElementById('searchResults');
+  if (!list.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  box.innerHTML = list.map((c, i) =>
+    `<div data-idx="${c._i}" class="${i === 0 ? 'active' : ''}">` +
+    `<span class="tk">${c.ticker || '—'}</span> ${c.name} ` +
+    `<span class="meta">&middot; ${c.city}, ${c.state}</span></div>`).join('');
+  box.classList.remove('hidden');
+}
+
+function selectCompany(c) {
+  if (searchMarker) map.removeLayer(searchMarker);
+  let distLine = '';
+  if (center) {
+    const d = haversineMiles(center.lat, center.lon, c.lat, c.lon);
+    distLine = `<br><span style="color:#666">${d.toFixed(1)} mi from your center</span>`;
+  }
+  searchMarker = L.marker([c.lat, c.lon], { icon: redIcon, zIndexOffset: 1000 })
+    .addTo(map).bindPopup(popupHtml(c, distLine));
+  map.setView([c.lat, c.lon], 11);
+  searchMarker.openPopup();
+  document.getElementById('searchResults').classList.add('hidden');
+}
+
+const searchInput = document.getElementById('companySearch');
+const resultsBox = document.getElementById('searchResults');
+searchInput.addEventListener('input', () => renderResults(searchCompanies(searchInput.value)));
+resultsBox.addEventListener('click', e => {
+  const div = e.target.closest('div[data-idx]');
+  if (!div) return;
+  const c = companies[+div.dataset.idx];
+  searchInput.value = c.name;
+  selectCompany(c);
+});
+searchInput.addEventListener('keydown', e => {
+  const items = [...resultsBox.querySelectorAll('div[data-idx]')];
+  if (!items.length) return;
+  let i = items.findIndex(d => d.classList.contains('active'));
+  if (e.key === 'ArrowDown') { e.preventDefault(); i = Math.min(items.length - 1, i + 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); i = Math.max(0, i - 1); }
+  else if (e.key === 'Enter') {
+    e.preventDefault();
+    const sel = items[i < 0 ? 0 : i];
+    if (sel) { const c = companies[+sel.dataset.idx]; searchInput.value = c.name; selectCompany(c); }
+    return;
+  } else return;
+  items.forEach(d => d.classList.remove('active'));
+  items[i].classList.add('active');
+  items[i].scrollIntoView({ block: 'nearest' });
+});
+document.addEventListener('click', e => {
+  if (!e.target.closest('#searchWrap')) resultsBox.classList.add('hidden');
+});
+
+// --- Hide / show the control panel (handy on small screens) ---
+const panelEl = document.getElementById('panel');
+const showPanelBtn = document.getElementById('showPanel');
+document.getElementById('hidePanel').addEventListener('click', () => {
+  panelEl.classList.add('hidden');
+  showPanelBtn.classList.remove('hidden');
+});
+showPanelBtn.addEventListener('click', () => {
+  panelEl.classList.remove('hidden');
+  showPanelBtn.classList.add('hidden');
+});
+
+function initCompanies(d) {
+  companies = d;
+  companies.forEach((c, i) => { c._i = i; });   // stable index for checkmark wiring
+  updateCheckedCount();
+  render();
+}
+
+if (Array.isArray(window.COMPANIES)) {
+  // Loaded via <script src="data/companies.js"> — works even on file://
+  initCompanies(window.COMPANIES);
+} else {
+  // Fallback for older builds without companies.js
+  fetch('data/companies.json')
+    .then(r => r.json())
+    .then(d => initCompanies(d))
+    .catch(() => { document.getElementById('count').textContent =
+      'Could not load company data — run build_data.py then make_js.py.'; });
+}
+</script>
+</body>
+</html>
