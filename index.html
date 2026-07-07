@@ -106,7 +106,8 @@
     <label><input type="checkbox" class="cap" value="50_300" checked> $50M&ndash;$300M</label>
     <label><input type="checkbox" class="cap" value="300_1b" checked> $300M&ndash;$1B</label>
     <label><input type="checkbox" class="cap" value="1b_2b" checked> $1B&ndash;$2B</label>
-    <label><input type="checkbox" class="cap" value="2b_10b" checked> $2B&ndash;$10B</label>
+    <label><input type="checkbox" class="cap" value="2b_5b" checked> $2B&ndash;$5B</label>
+    <label><input type="checkbox" class="cap" value="5b_10b" checked> $5B&ndash;$10B</label>
     <label><input type="checkbox" class="cap" value="10b" checked> $10B+</label>
   </div>
   <label id="unkRow"><input type="checkbox" id="includeUnknown" checked> Include companies with no cap data</label>
@@ -226,7 +227,11 @@ function restoreState() {
   if (!SAVED) return;
   if (SAVED.radius != null) document.getElementById('radius').value = SAVED.radius;
   if (Array.isArray(SAVED.ex)) document.querySelectorAll('.ex').forEach(e => e.checked = SAVED.ex.includes(e.value));
-  if (Array.isArray(SAVED.cap)) document.querySelectorAll('.cap').forEach(e => e.checked = SAVED.cap.includes(e.value));
+  if (Array.isArray(SAVED.cap)) {
+    // state saved before the 2B–10B bucket was split: it maps to both new buckets
+    if (SAVED.cap.includes('2b_10b')) SAVED.cap.push('2b_5b', '5b_10b');
+    document.querySelectorAll('.cap').forEach(e => e.checked = SAVED.cap.includes(e.value));
+  }
   if (Array.isArray(SAVED.ind)) document.querySelectorAll('.ind').forEach(e => e.checked = SAVED.ind.includes(e.value));
   if (typeof SAVED.incUnk === 'boolean') document.getElementById('includeUnknown').checked = SAVED.incUnk;
   if (typeof SAVED.incUnkInd === 'boolean') document.getElementById('includeUnknownInd').checked = SAVED.incUnkInd;
@@ -279,7 +284,8 @@ function render() {
       case '50_300': return v >= 50e6 && v < 300e6;
       case '300_1b': return v >= 300e6 && v < 1e9;
       case '1b_2b':  return v >= 1e9 && v < 2e9;
-      case '2b_10b': return v >= 2e9 && v < 10e9;
+      case '2b_5b':  return v >= 2e9 && v < 5e9;
+      case '5b_10b': return v >= 5e9 && v < 10e9;
       case '10b':    return v >= 10e9;
     }
     return false;
