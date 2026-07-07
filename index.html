@@ -198,7 +198,42 @@ window.toggleChecked = function (idx) {
   if (document.getElementById('hideChecked').checked) render();
 };
 
-const map = L.map('map').setView([39.5, -98.35], 4); // continental US
+// --- Session state (map view, center, radius, filters) persisted in this browser ---
+let SAVED = null;
+try { SAVED = JSON.parse(localStorage.getItem('mapState') || 'null'); } catch (e) {}
+
+const map = (SAVED && SAVED.view)
+  ? L.map('map').setView([SAVED.view.lat, SAVED.view.lon], SAVED.view.zoom)
+  : L.map('map').setView([39.5, -98.35], 4); // continental US default
+
+function saveState() {
+  const v = map.getCenter();
+  const st = {
+    view: { lat: v.lat, lon: v.lng, zoom: map.getZoom() },
+    center,
+    radius: +document.getElementById('radius').value,
+    ex: [...document.querySelectorAll('.ex:checked')].map(e => e.value),
+    cap: [...document.querySelectorAll('.cap:checked')].map(e => e.value),
+    ind: [...document.querySelectorAll('.ind:checked')].map(e => e.value),
+    incUnk: document.getElementById('includeUnknown').checked,
+    incUnkInd: document.getElementById('includeUnknownInd').checked,
+    hideChecked: document.getElementById('hideChecked').checked,
+  };
+  try { localStorage.setItem('mapState', JSON.stringify(st)); } catch (e) {}
+}
+
+function restoreState() {
+  if (!SAVED) return;
+  if (SAVED.radius != null) document.getElementById('radius').value = SAVED.radius;
+  if (Array.isArray(SAVED.ex)) document.querySelectorAll('.ex').forEach(e => e.checked = SAVED.ex.includes(e.value));
+  if (Array.isArray(SAVED.cap)) document.querySelectorAll('.cap').forEach(e => e.checked = SAVED.cap.includes(e.value));
+  if (Array.isArray(SAVED.ind)) document.querySelectorAll('.ind').forEach(e => e.checked = SAVED.ind.includes(e.value));
+  if (typeof SAVED.incUnk === 'boolean') document.getElementById('includeUnknown').checked = SAVED.incUnk;
+  if (typeof SAVED.incUnkInd === 'boolean') document.getElementById('includeUnknownInd').checked = SAVED.incUnkInd;
+  if (typeof SAVED.hideChecked === 'boolean') document.getElementById('hideChecked').checked = SAVED.hideChecked;
+  if (SAVED.center && typeof SAVED.center.lat === 'number') center = SAVED.center;
+}
+map.on('moveend', saveState);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19, attribution: '&copy; OpenStreetMap'
 }).addTo(map);
@@ -219,6 +254,7 @@ function render() {
   if (!center) {
     document.getElementById('count').innerHTML =
       `Set a location to search. <b>${companies.length}</b> companies loaded.`;
+    saveState();
     return;
   }
   markerLayer.clearLayers();
@@ -283,6 +319,7 @@ function render() {
   const checkedNote = nChecked ? ` &middot; <span style="color:#16a34a">${nChecked} looked into</span>` : '';
   document.getElementById('count').innerHTML =
     `<b>${hits.length}</b> public companies within ${radius} mi${checkedNote}`;
+  saveState();
 }
 
 function fmtCap(v) {
@@ -457,6 +494,7 @@ showPanelBtn.addEventListener('click', () => {
 function initCompanies(d) {
   companies = d;
   companies.forEach((c, i) => { c._i = i; });   // stable index for checkmark wiring
+  restoreState();
   updateCheckedCount();
   render();
 }
