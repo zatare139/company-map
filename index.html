@@ -196,7 +196,12 @@ const MILES_PER_KM = 0.621371;
 let companies = [];
 let center = null;            // {lat, lon}
 let circle = null;
-let markerLayer = L.markerClusterGroup({ chunkedLoading: true });
+let markerLayer = L.markerClusterGroup({
+  chunkedLoading: true,
+  spiderfyOnMaxZoom: false,      // never fan pins out in a circle — keep true positions
+  disableClusteringAtZoom: 15,   // street level: every pin at its exact spot, overlaps allowed
+  maxClusterRadius: 50           // cluster less aggressively while zooming in
+});
 
 // --- "Looked into" checkmarks (persisted in this browser) ---
 const idOf = c => (c.ticker ? 'T:' + c.ticker : 'N:' + c.name);
