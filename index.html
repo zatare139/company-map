@@ -75,6 +75,36 @@
     margin: 0; padding: 8px 12px; background: #2563eb; color: #fff; border: 0;
     border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,.25); cursor: pointer; font-size: 13px; }
   #showPanel:hover { background: #1d4ed8; }
+  /* --- Company detail drawer --- */
+  #drawer { position: absolute; z-index: 1100; top: 0; right: 0; height: 100%;
+    width: 400px; max-width: 100vw; background: #fff; box-shadow: -4px 0 18px rgba(0,0,0,.25);
+    transform: translateX(105%); transition: transform .25s ease; display: flex; flex-direction: column; }
+  #drawer.open { transform: translateX(0); }
+  #drawerHead { padding: 14px 16px 10px; border-bottom: 1px solid #eee; position: relative; }
+  #drawerHead h2 { margin: 0 0 2px; font-size: 17px; padding-right: 30px; }
+  #drawerMeta { font-size: 12.5px; color: #555; line-height: 1.5; }
+  #drawerClose { position: absolute; top: 10px; right: 10px; width: 26px; height: 26px; margin: 0; padding: 0;
+    background: #fff; color: #666; border: 1px solid #ddd; border-radius: 6px; font-size: 15px; cursor: pointer; }
+  #drawerClose:hover { background: #f3f4f6; }
+  #drawerChk { margin-top: 8px; }
+  #tabs { display: flex; border-bottom: 1px solid #e5e7eb; }
+  #tabs button { flex: 1; margin: 0; padding: 9px 4px; background: #fff; color: #555; border: 0;
+    border-bottom: 2px solid transparent; border-radius: 0; font-size: 13px; cursor: pointer; }
+  #tabs button:hover { background: #f8fafc; }
+  #tabs button.active { color: #2563eb; border-bottom-color: #2563eb; font-weight: 600; }
+  .tabPane { flex: 1; overflow-y: auto; padding: 12px 14px; display: none; }
+  .tabPane.active { display: block; }
+  .tvBox { margin-bottom: 12px; }
+  #contactList { font-size: 14px; line-height: 1.7; }
+  #contactList a { color: #2563eb; }
+  .mapsBtn { display: inline-block; margin-top: 10px; padding: 8px 12px; background: #2563eb; color: #fff !important;
+    border-radius: 7px; text-decoration: none; font-size: 13px; }
+  .mapsBtn:hover { background: #1d4ed8; }
+  @media (max-width: 640px) {
+    #drawer { top: auto; bottom: 0; height: 72%; width: 100%;
+      transform: translateY(110%); border-radius: 14px 14px 0 0; }
+    #drawer.open { transform: translateY(0); }
+  }
   /* Cluster bubbles: yellow -> orange as they grow (default green palette overridden) */
   .marker-cluster-small { background-color: rgba(253, 224, 71, .6); }
   .marker-cluster-small div { background-color: rgba(250, 204, 21, .75); }
@@ -141,6 +171,22 @@
   <div class="hint">Type an address and press Go, click "Use my location", or click anywhere on the map to set your center point.</div>
 </div>
 <button id="showPanel" class="hidden" title="Show panel">&#9776; Panel</button>
+<div id="drawer">
+  <div id="drawerHead">
+    <button id="drawerClose" title="Close">&#10005;</button>
+    <h2 id="drawerName"></h2>
+    <div id="drawerMeta"></div>
+    <button class="chk" id="drawerChk"></button>
+  </div>
+  <div id="tabs">
+    <button data-tab="overview" class="active">Overview</button>
+    <button data-tab="perf">Performance</button>
+    <button data-tab="contacts">Contacts</button>
+  </div>
+  <div class="tabPane active" id="tab-overview"></div>
+  <div class="tabPane" id="tab-perf"></div>
+  <div class="tabPane" id="tab-contacts"></div>
+</div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
@@ -172,22 +218,6 @@ const redIcon = new L.Icon({
   iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
 });
 
-// Shared popup body for both the radius markers and the company-search pin.
-function popupHtml(c, extra) {
-  const exLabel = c.exchange ? ` &middot; ${c.exchange}` : '';
-  const capLabel = c.mcap != null ? `<br>Market cap: ${fmtCap(c.mcap)}` : '';
-  const secLabel = c.sector ? `<br><span style="color:#444">${c.sector}</span>` : '';
-  return `<b>${c.name}</b><br>${c.ticker ? c.ticker : ''}${exLabel}` +
-    `<br>${c.city}, ${c.state}${secLabel}${capLabel}` +
-    (extra || '') + chkBtnHtml(c);
-}
-
-function chkBtnHtml(c) {
-  const on = checked.has(idOf(c));
-  return `<button class="chk ${on ? 'on' : ''}" id="chk-${c._i}" onclick="toggleChecked(${c._i})">` +
-    `${on ? '✓ Looked into — click to undo' : 'Mark as looked into'}</button>`;
-}
-
 window.toggleChecked = function (idx) {
   const c = companies[idx];
   const id = idOf(c);
@@ -196,15 +226,115 @@ window.toggleChecked = function (idx) {
   updateCheckedCount();
   const m = markerByIdx[idx];
   if (m) m.setIcon(checked.has(id) ? visitedIcon : blueIcon);
-  const btn = document.getElementById('chk-' + idx);
-  if (btn) {
-    const on = checked.has(id);
-    btn.className = 'chk ' + (on ? 'on' : '');
-    btn.textContent = on ? '✓ Looked into — click to undo' : 'Mark as looked into';
-  }
+  if (drawerCompany && drawerCompany._i === idx) drawerChkBtn();
   // if "hide looked into" is on, refresh so the marker drops off
   if (document.getElementById('hideChecked').checked) render();
 };
+
+// --- Company detail drawer (Overview / Performance / Contacts) ---
+const drawerEl = document.getElementById('drawer');
+let drawerCompany = null;
+const tvLoaded = { overview: false, perf: false };
+
+// TradingView wants exchange-qualified symbols where we know the venue.
+function tvSymbol(c) {
+  const pre = { NYSE: 'NYSE', Nasdaq: 'NASDAQ', OTC: 'OTC' }[c.exchange];
+  return pre ? pre + ':' + c.ticker : c.ticker;
+}
+
+function tvWidget(container, script, config) {
+  const box = document.createElement('div');
+  box.className = 'tvBox';
+  const inner = document.createElement('div');
+  inner.className = 'tradingview-widget-container';
+  box.appendChild(inner);
+  const s = document.createElement('script');
+  s.type = 'text/javascript';
+  s.async = true;
+  s.src = 'https://s3.tradingview.com/external-embedding/' + script;
+  s.text = JSON.stringify(config);
+  inner.appendChild(s);
+  container.appendChild(box);
+}
+
+function drawerChkBtn() {
+  const on = checked.has(idOf(drawerCompany));
+  const b = document.getElementById('drawerChk');
+  b.className = 'chk ' + (on ? 'on' : '');
+  b.textContent = on ? '✓ Looked into — click to undo' : 'Mark as looked into';
+}
+
+function buildContacts(c) {
+  const street = c.addr || '';
+  const cityLine = `${c.city}, ${c.state}${c.zip ? ' ' + c.zip : ''}`;
+  const full = street ? `${street}, ${cityLine}` : `${c.name}, ${cityLine}`;
+  const phoneHtml = c.phone
+    ? `<b>Phone:</b> <a href="tel:${String(c.phone).replace(/[^+\d]/g, '')}">${c.phone}</a>`
+    : `<b>Phone:</b> <span style="color:#888">not in SEC filings</span>`;
+  document.getElementById('tab-contacts').innerHTML =
+    `<div id="contactList">${phoneHtml}<br>` +
+    `<b>HQ address:</b><br>${street ? street + '<br>' : ''}${cityLine}` +
+    `<br><a class="mapsBtn" target="_blank" rel="noopener" ` +
+    `href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(full)}">` +
+    `&#128663; Directions in Google Maps</a></div>` +
+    (street ? '' : `<div class="hint">Street address not found in SEC data for this company.</div>`);
+}
+
+function switchTab(name) {
+  document.querySelectorAll('#tabs button').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tabPane').forEach(p =>
+    p.classList.toggle('active', p.id === 'tab-' + name));
+  const c = drawerCompany;
+  if (!c) return;
+  // TradingView widgets load lazily, once per company per tab
+  if (name === 'overview' && !tvLoaded.overview) {
+    tvLoaded.overview = true;
+    tvWidget(document.getElementById('tab-overview'), 'embed-widget-symbol-profile.js',
+      { symbol: tvSymbol(c), width: '100%', height: 420, isTransparent: true, colorTheme: 'light', locale: 'en' });
+  }
+  if (name === 'perf' && !tvLoaded.perf) {
+    tvLoaded.perf = true;
+    const pane = document.getElementById('tab-perf');
+    tvWidget(pane, 'embed-widget-symbol-info.js',
+      { symbol: tvSymbol(c), width: '100%', isTransparent: true, colorTheme: 'light', locale: 'en' });
+    tvWidget(pane, 'embed-widget-symbol-overview.js', {
+      symbols: [[c.name, tvSymbol(c) + '|12M']],
+      chartOnly: true, width: '100%', height: 300, colorTheme: 'light', isTransparent: true,
+      locale: 'en', showVolume: false, scalePosition: 'right', valuesTracking: '1',
+      dateRanges: ['12m|1D', '60m|1W', 'all|1M']
+    });
+    tvWidget(pane, 'embed-widget-financials.js',
+      { symbol: tvSymbol(c), width: '100%', height: 440, displayMode: 'regular',
+        isTransparent: true, colorTheme: 'light', locale: 'en' });
+  }
+}
+
+function openDrawer(c) {
+  drawerCompany = c;
+  tvLoaded.overview = tvLoaded.perf = false;
+  document.getElementById('drawerName').textContent = c.name;
+  const bits = [];
+  if (c.ticker) bits.push(c.ticker);
+  if (c.sector) bits.push(c.sector);
+  if (c.mcap != null) bits.push(fmtCap(c.mcap) + ' mkt cap');
+  if (center) bits.push(haversineMiles(center.lat, center.lon, c.lat, c.lon).toFixed(1) + ' mi away');
+  document.getElementById('drawerMeta').textContent = bits.join(' · ');
+  drawerChkBtn();
+  document.getElementById('tab-overview').innerHTML = '';
+  document.getElementById('tab-perf').innerHTML = '';
+  buildContacts(c);
+  switchTab('overview');
+  drawerEl.classList.add('open');
+}
+
+document.getElementById('drawerClose').addEventListener('click', () => drawerEl.classList.remove('open'));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') drawerEl.classList.remove('open'); });
+document.querySelectorAll('#tabs button').forEach(b =>
+  b.addEventListener('click', () => switchTab(b.dataset.tab)));
+document.getElementById('drawerChk').addEventListener('click', () => {
+  if (drawerCompany) toggleChecked(drawerCompany._i);
+});
 
 // --- Session state (map view, center, radius, filters) persisted in this browser ---
 let SAVED = null;
@@ -318,15 +448,12 @@ function render() {
     if (d <= radius) hits.push([d, c]);
   }
   hits.sort((a,b) => a[0]-b[0]);
-  const locNote = { zip: '', city: ' (city-level)', state: ' (state-level)', country: ' (country-level)', geocoded: ' (approx)' };
   let nChecked = 0;
   for (const [d, c] of hits) {
-    const approx = locNote[c.loc] || '';
     const isOn = checked.has(idOf(c));
     if (isOn) nChecked++;
-    const distLine = `<br><span style="color:#666">${d.toFixed(1)} mi away${approx}</span>`;
     const m = L.marker([c.lat, c.lon], { icon: isOn ? visitedIcon : blueIcon })
-      .addTo(markerLayer).bindPopup(popupHtml(c, distLine));
+      .addTo(markerLayer).on('click', () => openDrawer(c));
     markerByIdx[c._i] = m;
   }
   const checkedNote = nChecked ? ` &middot; <span style="color:#7c3aed">${nChecked} looked into</span>` : '';
@@ -450,15 +577,10 @@ function renderResults(list) {
 
 function selectCompany(c) {
   if (searchMarker) map.removeLayer(searchMarker);
-  let distLine = '';
-  if (center) {
-    const d = haversineMiles(center.lat, center.lon, c.lat, c.lon);
-    distLine = `<br><span style="color:#666">${d.toFixed(1)} mi from your center</span>`;
-  }
   searchMarker = L.marker([c.lat, c.lon], { icon: redIcon, zIndexOffset: 1000 })
-    .addTo(map).bindPopup(popupHtml(c, distLine));
+    .addTo(map).on('click', () => openDrawer(c));
   map.setView([c.lat, c.lon], 11);
-  searchMarker.openPopup();
+  openDrawer(c);
   document.getElementById('searchResults').classList.add('hidden');
 }
 
