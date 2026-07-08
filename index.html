@@ -50,11 +50,11 @@
   #clearChecked { width: auto; margin-top: 6px; padding: 3px 8px; font-size: 11px;
     background: #fff; color: #b91c1c; border: 1px solid #b91c1c; }
   #clearChecked:hover { background: #fef2f2; }
-  .chk { margin-top: 8px; width: 100%; padding: 6px; border: 1px solid #16a34a;
-    background: #fff; color: #16a34a; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; }
-  .chk:hover { background: #f0fdf4; }
-  .chk.on { background: #16a34a; color: #fff; border-color: #15803d; }
-  .chk.on:hover { background: #15803d; }
+  .chk { margin-top: 8px; width: 100%; padding: 6px; border: 1px solid #7c3aed;
+    background: #fff; color: #7c3aed; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; }
+  .chk:hover { background: #f5f3ff; }
+  .chk.on { background: #7c3aed; color: #fff; border-color: #6d28d9; }
+  .chk.on:hover { background: #6d28d9; }
   #companySearch { width: 100%; box-sizing: border-box; padding: 6px 8px;
     border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
   #searchResults { border: 1px solid #e5e7eb; border-radius: 6px; margin-top: 4px;
@@ -75,6 +75,13 @@
     margin: 0; padding: 8px 12px; background: #2563eb; color: #fff; border: 0;
     border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,.25); cursor: pointer; font-size: 13px; }
   #showPanel:hover { background: #1d4ed8; }
+  /* Cluster bubbles: yellow -> orange as they grow (default green palette overridden) */
+  .marker-cluster-small { background-color: rgba(253, 224, 71, .6); }
+  .marker-cluster-small div { background-color: rgba(250, 204, 21, .75); }
+  .marker-cluster-medium { background-color: rgba(251, 191, 36, .6); }
+  .marker-cluster-medium div { background-color: rgba(245, 158, 11, .75); }
+  .marker-cluster-large { background-color: rgba(251, 146, 60, .6); }
+  .marker-cluster-large div { background-color: rgba(249, 115, 22, .8); }
 </style>
 </head>
 <body>
@@ -154,8 +161,8 @@ function saveChecked() { localStorage.setItem('checkedCompanies', JSON.stringify
 function updateCheckedCount() { document.getElementById('checkedCount').textContent = checked.size; }
 
 const blueIcon = new L.Icon.Default();
-const greenIcon = new L.Icon({
-  iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-green.png',
+const visitedIcon = new L.Icon({
+  iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-violet.png',
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
   iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
 });
@@ -188,7 +195,7 @@ window.toggleChecked = function (idx) {
   saveChecked();
   updateCheckedCount();
   const m = markerByIdx[idx];
-  if (m) m.setIcon(checked.has(id) ? greenIcon : blueIcon);
+  if (m) m.setIcon(checked.has(id) ? visitedIcon : blueIcon);
   const btn = document.getElementById('chk-' + idx);
   if (btn) {
     const on = checked.has(id);
@@ -318,11 +325,11 @@ function render() {
     const isOn = checked.has(idOf(c));
     if (isOn) nChecked++;
     const distLine = `<br><span style="color:#666">${d.toFixed(1)} mi away${approx}</span>`;
-    const m = L.marker([c.lat, c.lon], { icon: isOn ? greenIcon : blueIcon })
+    const m = L.marker([c.lat, c.lon], { icon: isOn ? visitedIcon : blueIcon })
       .addTo(markerLayer).bindPopup(popupHtml(c, distLine));
     markerByIdx[c._i] = m;
   }
-  const checkedNote = nChecked ? ` &middot; <span style="color:#16a34a">${nChecked} looked into</span>` : '';
+  const checkedNote = nChecked ? ` &middot; <span style="color:#7c3aed">${nChecked} looked into</span>` : '';
   document.getElementById('count').innerHTML =
     `<b>${hits.length}</b> public companies within ${radius} mi${checkedNote}`;
   saveState();
