@@ -290,7 +290,7 @@ function switchTab(name) {
   }
 }
 
-function openCompanyPopup(c) {
+function openCompanyPopup(c, at) {
   popCompany = c;
   tvLoaded.overview = tvLoaded.perf = false;
   const el = document.createElement('div');
@@ -304,7 +304,7 @@ function openCompanyPopup(c) {
     `<div class="popPane active" id="pop-overview"></div>` +
     `<div class="popPane" id="pop-perf"></div>` +
     `<div class="popPane" id="pop-contacts"></div>`;
-  companyPopup.setLatLng([c.lat, c.lon]).setContent(el).openOn(map);
+  companyPopup.setLatLng(at || [c.lat, c.lon]).setContent(el).openOn(map);
   document.getElementById('popName').textContent = c.name;
   const bits = [];
   if (c.ticker) bits.push(c.ticker);
@@ -433,11 +433,26 @@ function render() {
   }
   hits.sort((a,b) => a[0]-b[0]);
   let nChecked = 0;
+  // Companies without a geocoded street address sit on their ZIP centroid, so
+  // several can share IDENTICAL coordinates. Fan such stacks out by a few meters
+  // (deterministic ring) so every HQ stays visible and clickable when zoomed in.
+  const stack = new Map();
   for (const [d, c] of hits) {
     const isOn = checked.has(idOf(c));
     if (isOn) nChecked++;
-    const m = L.marker([c.lat, c.lon], { icon: isOn ? visitedIcon : blueIcon })
-      .addTo(markerLayer).on('click', () => openCompanyPopup(c));
+    const key = c.lat.toFixed(5) + ',' + c.lon.toFixed(5);
+    const n = stack.get(key) || 0;
+    stack.set(key, n + 1);
+    let lat = c.lat, lon = c.lon;
+    if (n > 0) {
+      const ring = Math.ceil(n / 8), pos = (n - 1) % 8;
+      const r = 0.00013 * ring, ang = pos * Math.PI / 4;
+      lat += r * Math.cos(ang);
+      lon += r * Math.sin(ang) / Math.cos(lat * Math.PI / 180);
+    }
+    const m = L.marker([lat, lon], { icon: isOn ? visitedIcon : blueIcon })
+      .addTo(markerLayer);
+    m.on('click', () => openCompanyPopup(c, m.getLatLng()));
     markerByIdx[c._i] = m;
   }
   const checkedNote = nChecked ? ` &middot; <span style="color:#7c3aed">${nChecked} looked into</span>` : '';
