@@ -55,6 +55,15 @@
   .chk:hover { background: #f5f3ff; }
   .chk.on { background: #7c3aed; color: #fff; border-color: #6d28d9; }
   .chk.on:hover { background: #6d28d9; }
+  .chk.grn { border-color: #16a34a; color: #16a34a; }
+  .chk.grn:hover { background: #f0fdf4; }
+  .chk.grn.on { background: #16a34a; color: #fff; border-color: #15803d; }
+  .chk.grn.on:hover { background: #15803d; }
+  #popBtns { display: flex; gap: 6px; }
+  #popBtns .chk { flex: 1; }
+  #popNoteText { width: 100%; box-sizing: border-box; height: 220px; padding: 8px;
+    border: 1px solid #ccc; border-radius: 6px; font: 13px/1.5 system-ui, sans-serif; resize: vertical; }
+  #syncRow { margin-top: 8px; font-size: 11px; color: #666; }
   #companySearch { width: 100%; box-sizing: border-box; padding: 6px 8px;
     border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
   #searchResults { border: 1px solid #e5e7eb; border-radius: 6px; margin-top: 4px;
@@ -81,7 +90,6 @@
   #popHead { padding: 12px 14px 8px; border-bottom: 1px solid #eee; }
   #popHead h2 { margin: 0 0 2px; font-size: 16px; padding-right: 14px; }
   #popMeta { font-size: 12px; color: #555; line-height: 1.5; }
-  #popChk { margin-top: 8px; }
   #popTabs { display: flex; border-bottom: 1px solid #e5e7eb; }
   #popTabs button { flex: 1; margin: 0; padding: 8px 4px; background: #fff; color: #555; border: 0;
     border-bottom: 2px solid transparent; border-radius: 0; font-size: 13px; cursor: pointer; }
@@ -158,7 +166,9 @@
   <button id="clearChecked">Reset my checkmarks</button>
   <button id="locate">Use my location</button>
   <div id="count">Loading company data…</div>
-  <div class="hint">Type an address and press Go, click "Use my location", or click anywhere on the map to set your center point.</div>
+  <div id="syncRow"><span class="toggleAll" id="syncSetup">Set up sync</span> <span id="syncStatus"></span></div>
+  <div class="hint">Pins: blue = not visited &middot; purple = looked into &middot; green = revisit.
+    Type an address and press Go, click "Use my location", or click anywhere on the map to set your center point.</div>
 </div>
 <button id="showPanel" class="hidden" title="Show panel">&#9776; Panel</button>
 
@@ -177,13 +187,121 @@ let markerLayer = L.markerClusterGroup({
   maxClusterRadius: 50           // cluster less aggressively while zooming in
 });
 
-// --- "Looked into" checkmarks (persisted in this browser) ---
+// --- Per-company status + notes (persisted in this browser, synced via Google Sheet) ---
+// statusMap: id -> { s: ''|'done'|'revisit', n: notes, u: last-edit epoch ms }
 const idOf = c => (c.ticker ? 'T:' + c.ticker : 'N:' + c.name);
-let checked = new Set();
-try { checked = new Set(JSON.parse(localStorage.getItem('checkedCompanies') || '[]')); } catch (e) {}
+let statusMap = {};
+try { statusMap = JSON.parse(localStorage.getItem('companyStatus') || 'null') || {}; } catch (e) {}
+// migrate the old boolean checkmark store
+try {
+  const old = JSON.parse(localStorage.getItem('checkedCompanies') || '[]');
+  for (const id of old) if (!statusMap[id]) statusMap[id] = { s: 'done', n: '', u: 0 };
+} catch (e) {}
 const markerByIdx = {};   // company index -> marker, rebuilt each render
-function saveChecked() { localStorage.setItem('checkedCompanies', JSON.stringify([...checked])); }
-function updateCheckedCount() { document.getElementById('checkedCount').textContent = checked.size; }
+function saveStatus() { localStorage.setItem('companyStatus', JSON.stringify(statusMap)); }
+const statusOf = c => (statusMap[idOf(c)] || {}).s || '';
+const noteOf = c => (statusMap[idOf(c)] || {}).n || '';
+function statusRec(c) {
+  const id = idOf(c);
+  return statusMap[id] || (statusMap[id] = { s: '', n: '', u: 0 });
+}
+function updateCheckedCount() {
+  const vals = Object.values(statusMap);
+  document.getElementById('checkedCount').textContent = vals.filter(v => v.s === 'done').length;
+}
+
+// --- Sync bridge (Google Apps Script -> Google Sheet). Config lives per device. ---
+let syncCfg = null;
+try { syncCfg = JSON.parse(localStorage.getItem('syncConfig') || 'null'); } catch (e) {}
+const syncQueue = new Set();
+let syncTimer = null;
+
+function setSyncStatus(msg) {
+  const el = document.getElementById('syncStatus');
+  if (el) el.textContent = msg;
+}
+
+function queueSync(id) {
+  if (!syncCfg) return;
+  syncQueue.add(id);
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(flushSync, 800);
+}
+
+async function flushSync() {
+  if (!syncCfg || !syncQueue.size) return;
+  const ids = [...syncQueue];
+  syncQueue.clear();
+  const byId = {};
+  companies.forEach(c => { byId[idOf(c)] = c; });
+  for (const id of ids) {
+    const rec = statusMap[id] || { s: '', n: '', u: Date.now() };
+    const c = byId[id] || {};
+    try {
+      // text/plain avoids a CORS preflight that Apps Script can't answer
+      await fetch(syncCfg.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ token: syncCfg.token, key: id, ticker: c.ticker || '',
+          company: c.name || '', status: rec.s, notes: rec.n, updated: rec.u })
+      });
+      setSyncStatus('Synced ' + new Date().toLocaleTimeString());
+    } catch (e) {
+      syncQueue.add(id);            // retry on next change
+      setSyncStatus('Sync failed — will retry');
+    }
+  }
+}
+
+let lastPull = 0;
+async function syncPull() {
+  if (!syncCfg) return;
+  lastPull = Date.now();
+  setSyncStatus('Syncing…');
+  try {
+    const r = await fetch(syncCfg.url + '?token=' + encodeURIComponent(syncCfg.token));
+    const data = await r.json();
+    if (!data.ok) { setSyncStatus('Sync error: ' + (data.error || '?')); return; }
+    let pulled = 0;
+    for (const row of data.rows) {
+      const local = statusMap[row.key];
+      const remoteU = +row.updated || 0;
+      if (!local || remoteU > (local.u || 0)) {
+        statusMap[row.key] = { s: row.status || (row.lookedInto ? 'done' : ''), n: row.notes || '', u: remoteU };
+        pulled++;
+      } else if ((local.u || 0) > remoteU && (local.s || local.n)) {
+        queueSync(row.key);         // this device has the newer edit — push it
+      }
+    }
+    // push local records the sheet has never seen
+    const seen = new Set(data.rows.map(r2 => r2.key));
+    for (const id in statusMap) {
+      if (!seen.has(id) && (statusMap[id].s || statusMap[id].n)) queueSync(id);
+    }
+    saveStatus();
+    updateCheckedCount();
+    render();
+    setSyncStatus('Synced ' + new Date().toLocaleTimeString() + (pulled ? ` (${pulled} pulled)` : ''));
+  } catch (e) {
+    setSyncStatus('Sync unreachable — working offline');
+  }
+}
+
+// Coming back to the tab (e.g. opening the phone after edits on the laptop) re-pulls.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && syncCfg && Date.now() - lastPull > 60000) syncPull();
+});
+
+function setupSync() {
+  const url = prompt('Paste your Apps Script web app URL (ends in /exec):',
+    (syncCfg && syncCfg.url) || '');
+  if (!url) return;
+  const token = prompt('Paste your sync token:', (syncCfg && syncCfg.token) || '');
+  if (!token) return;
+  syncCfg = { url: url.trim(), token: token.trim() };
+  localStorage.setItem('syncConfig', JSON.stringify(syncCfg));
+  syncPull();
+}
 
 const blueIcon = new L.Icon.Default();
 const visitedIcon = new L.Icon({
@@ -191,24 +309,39 @@ const visitedIcon = new L.Icon({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
   iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
 });
+const revisitIcon = new L.Icon({
+  iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-green.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+});
+const iconFor = c => ({ done: visitedIcon, revisit: revisitIcon }[statusOf(c)] || blueIcon);
 const redIcon = new L.Icon({
   iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-red.png',
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
   iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
 });
 
-window.toggleChecked = function (idx) {
-  const c = companies[idx];
-  const id = idOf(c);
-  if (checked.has(id)) checked.delete(id); else checked.add(id);
-  saveChecked();
+function setStatus(c, s) {
+  const rec = statusRec(c);
+  rec.s = (rec.s === s) ? '' : s;   // clicking the active status clears it
+  rec.u = Date.now();
+  saveStatus();
   updateCheckedCount();
-  const m = markerByIdx[idx];
-  if (m) m.setIcon(checked.has(id) ? visitedIcon : blueIcon);
-  if (popCompany && popCompany._i === idx) popChkBtn();
-  // if "hide looked into" is on, refresh so the marker drops off
-  if (document.getElementById('hideChecked').checked) render();
-};
+  queueSync(idOf(c));
+  const m = markerByIdx[c._i];
+  if (m) m.setIcon(iconFor(c));
+  if (popCompany && popCompany._i === c._i) popStatusBtns();
+  render();   // refresh counts (and drop the marker if "hide looked into" is on)
+}
+
+function setNote(c, text) {
+  const rec = statusRec(c);
+  if (rec.n === text) return;
+  rec.n = text;
+  rec.u = Date.now();
+  saveStatus();
+  queueSync(idOf(c));
+}
 
 // --- Company detail popup (Overview / Performance / Contacts), anchored to the pin ---
 let popCompany = null;
@@ -236,12 +369,15 @@ function tvWidget(container, script, config) {
   container.appendChild(box);
 }
 
-function popChkBtn() {
-  const on = checked.has(idOf(popCompany));
-  const b = document.getElementById('popChk');
-  if (!b) return;
-  b.className = 'chk ' + (on ? 'on' : '');
-  b.textContent = on ? '✓ Looked into — click to undo' : 'Mark as looked into';
+function popStatusBtns() {
+  const s = statusOf(popCompany);
+  const done = document.getElementById('popDone');
+  const rev = document.getElementById('popRevisit');
+  if (!done || !rev) return;
+  done.className = 'chk ' + (s === 'done' ? 'on' : '');
+  done.textContent = s === 'done' ? '✓ Looked into' : 'Mark as looked into';
+  rev.className = 'chk grn ' + (s === 'revisit' ? 'on' : '');
+  rev.textContent = s === 'revisit' ? '↻ Revisit planned' : 'Visited — revisit later';
 }
 
 function buildContacts(c) {
@@ -296,14 +432,19 @@ function openCompanyPopup(c, at) {
   const el = document.createElement('div');
   el.innerHTML =
     `<div id="popHead"><h2 id="popName"></h2><div id="popMeta"></div>` +
-    `<button class="chk" id="popChk"></button></div>` +
+    `<div id="popBtns"><button class="chk" id="popDone"></button>` +
+    `<button class="chk grn" id="popRevisit"></button></div></div>` +
     `<div id="popTabs">` +
     `<button data-tab="overview" class="active">Overview</button>` +
-    `<button data-tab="perf">Performance</button>` +
-    `<button data-tab="contacts">Contacts</button></div>` +
+    `<button data-tab="perf">Chart</button>` +
+    `<button data-tab="contacts">Contacts</button>` +
+    `<button data-tab="notes" id="popNotesTab">Notes</button></div>` +
     `<div class="popPane active" id="pop-overview"></div>` +
     `<div class="popPane" id="pop-perf"></div>` +
-    `<div class="popPane" id="pop-contacts"></div>`;
+    `<div class="popPane" id="pop-contacts"></div>` +
+    `<div class="popPane" id="pop-notes">` +
+    `<textarea id="popNoteText" placeholder="Notes from your visit — who you talked to, follow-ups, impressions…"></textarea>` +
+    `<div class="hint" id="noteHint">Saved automatically.</div></div>`;
   companyPopup.setLatLng(at || [c.lat, c.lon]).setContent(el).openOn(map);
   document.getElementById('popName').textContent = c.name;
   const bits = [];
@@ -312,12 +453,26 @@ function openCompanyPopup(c, at) {
   if (c.mcap != null) bits.push(fmtCap(c.mcap) + ' mkt cap');
   if (center) bits.push(haversineMiles(center.lat, center.lon, c.lat, c.lon).toFixed(1) + ' mi away');
   document.getElementById('popMeta').textContent = bits.join(' · ');
-  popChkBtn();
+  popStatusBtns();
   buildContacts(c);
+  const ta = document.getElementById('popNoteText');
+  ta.value = noteOf(c);
+  markNotesTab();
+  let noteTimer = null;
+  ta.addEventListener('input', () => {
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => { setNote(c, ta.value.trim()); markNotesTab(); }, 500);
+  });
   el.querySelectorAll('#popTabs button').forEach(b =>
     b.addEventListener('click', () => switchTab(b.dataset.tab)));
-  document.getElementById('popChk').addEventListener('click', () => toggleChecked(c._i));
+  document.getElementById('popDone').addEventListener('click', () => setStatus(c, 'done'));
+  document.getElementById('popRevisit').addEventListener('click', () => setStatus(c, 'revisit'));
   switchTab('overview');
+}
+
+function markNotesTab() {
+  const t = document.getElementById('popNotesTab');
+  if (t && popCompany) t.textContent = noteOf(popCompany) ? 'Notes ●' : 'Notes';
 }
 
 // --- Session state (map view, center, radius, filters) persisted in this browser ---
@@ -427,19 +582,20 @@ function render() {
   const hits = [];
   for (const c of companies) {
     if (!exOK(c) || !capOK(c) || !indOK(c)) continue;
-    if (hideChecked && checked.has(idOf(c))) continue;
+    if (hideChecked && statusOf(c) === 'done') continue;
     const d = haversineMiles(center.lat, center.lon, c.lat, c.lon);
     if (d <= radius) hits.push([d, c]);
   }
   hits.sort((a,b) => a[0]-b[0]);
-  let nChecked = 0;
+  let nDone = 0, nRevisit = 0;
   // Companies without a geocoded street address sit on their ZIP centroid, so
   // several can share IDENTICAL coordinates. Fan such stacks out by a few meters
   // (deterministic ring) so every HQ stays visible and clickable when zoomed in.
   const stack = new Map();
   for (const [d, c] of hits) {
-    const isOn = checked.has(idOf(c));
-    if (isOn) nChecked++;
+    const s = statusOf(c);
+    if (s === 'done') nDone++;
+    if (s === 'revisit') nRevisit++;
     const key = c.lat.toFixed(5) + ',' + c.lon.toFixed(5);
     const n = stack.get(key) || 0;
     stack.set(key, n + 1);
@@ -450,14 +606,15 @@ function render() {
       lat += r * Math.cos(ang);
       lon += r * Math.sin(ang) / Math.cos(lat * Math.PI / 180);
     }
-    const m = L.marker([lat, lon], { icon: isOn ? visitedIcon : blueIcon })
+    const m = L.marker([lat, lon], { icon: iconFor(c) })
       .addTo(markerLayer);
     m.on('click', () => openCompanyPopup(c, m.getLatLng()));
     markerByIdx[c._i] = m;
   }
-  const checkedNote = nChecked ? ` &middot; <span style="color:#7c3aed">${nChecked} looked into</span>` : '';
+  const doneNote = nDone ? ` &middot; <span style="color:#7c3aed">${nDone} looked into</span>` : '';
+  const revNote = nRevisit ? ` &middot; <span style="color:#16a34a">${nRevisit} to revisit</span>` : '';
   document.getElementById('count').innerHTML =
-    `<b>${hits.length}</b> public companies within ${radius} mi${checkedNote}`;
+    `<b>${hits.length}</b> public companies within ${radius} mi${doneNote}${revNote}`;
   saveState();
 }
 
@@ -474,7 +631,7 @@ function setCenter(lat, lon, zoom) {
   render();
 }
 
-function setStatus(msg) { document.getElementById('count').innerHTML = msg; }
+function setCountMsg(msg) { document.getElementById('count').innerHTML = msg; }
 
 async function geocode(query) {
   const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q='
@@ -488,13 +645,13 @@ async function geocode(query) {
 async function doSearch() {
   const q = document.getElementById('address').value.trim();
   if (!q) { document.getElementById('address').focus(); return; }
-  setStatus('Looking up address…');
+  setCountMsg('Looking up address…');
   try {
     const loc = await geocode(q);
-    if (!loc) { setStatus('Address not found. Try adding a city or state.'); return; }
+    if (!loc) { setCountMsg('Address not found. Try adding a city or state.'); return; }
     setCenter(loc.lat, loc.lon, 9);
   } catch (e) {
-    setStatus('Address lookup failed (network/CORS). Click the map instead.');
+    setCountMsg('Address lookup failed (network/CORS). Click the map instead.');
   }
 }
 
@@ -516,10 +673,14 @@ document.getElementById('indNone').addEventListener('click', () => {
 });
 document.getElementById('hideChecked').addEventListener('change', render);
 document.getElementById('clearChecked').addEventListener('click', () => {
-  if (!checked.size) return;
-  if (!confirm(`Clear all ${checked.size} checkmarks? This can't be undone.`)) return;
-  checked.clear();
-  saveChecked();
+  const n = Object.values(statusMap).filter(v => v.s).length;
+  if (!n) return;
+  if (!confirm(`Clear all ${n} status marks? Notes are kept. This also clears them from the synced sheet.`)) return;
+  const now = Date.now();
+  for (const id in statusMap) {
+    if (statusMap[id].s) { statusMap[id].s = ''; statusMap[id].u = now; queueSync(id); }
+  }
+  saveStatus();
   updateCheckedCount();
   render();
 });
@@ -529,15 +690,15 @@ document.getElementById('address').addEventListener('keydown', e => {
   if (e.key === 'Enter') doSearch();
 });
 document.getElementById('locate').addEventListener('click', () => {
-  if (!navigator.geolocation) { setStatus('Geolocation unavailable. Type an address above.'); return; }
+  if (!navigator.geolocation) { setCountMsg('Geolocation unavailable. Type an address above.'); return; }
   if (!window.isSecureContext) {
-    setStatus('Location needs https or localhost. Type an address above instead.');
+    setCountMsg('Location needs https or localhost. Type an address above instead.');
     return;
   }
-  setStatus('Getting your location…');
+  setCountMsg('Getting your location…');
   navigator.geolocation.getCurrentPosition(
     p => setCenter(p.coords.latitude, p.coords.longitude, 9),
-    err => setStatus('Location blocked (' + err.message + '). Type an address above.')
+    err => setCountMsg('Location blocked (' + err.message + '). Type an address above.')
   );
 });
 
@@ -631,7 +792,9 @@ function initCompanies(d) {
   restoreState();
   updateCheckedCount();
   render();
+  if (syncCfg) syncPull(); else setSyncStatus('Sync off — tap "Set up sync"');
 }
+document.getElementById('syncSetup').addEventListener('click', setupSync);
 
 if (Array.isArray(window.COMPANIES)) {
   // Loaded via <script src="data/companies.js"> — works even on file://
