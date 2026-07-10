@@ -292,6 +292,16 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && syncCfg && Date.now() - lastPull > 60000) syncPull();
 });
 
+// One-click device setup: open  <map-url>#sync=<exec-url>|<token>  once and the
+// config is stored, then scrubbed from the address bar (the hash never reaches any server).
+(function hashSetup() {
+  const m = location.hash.match(/^#sync=([^|]+)\|(.+)$/);
+  if (!m) return;
+  syncCfg = { url: decodeURIComponent(m[1]), token: decodeURIComponent(m[2]) };
+  localStorage.setItem('syncConfig', JSON.stringify(syncCfg));
+  history.replaceState(null, '', location.pathname + location.search);
+})();
+
 function setupSync() {
   const url = prompt('Paste your Apps Script web app URL (ends in /exec):',
     (syncCfg && syncCfg.url) || '');
