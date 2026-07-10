@@ -100,6 +100,24 @@
   .tvBox { margin-bottom: 12px; }
   #contactList { font-size: 14px; line-height: 1.7; }
   #contactList a { color: #2563eb; }
+  .irscan { font-size: 12.5px; line-height: 1.5; color: #1f2937; }
+  .irscan h3 { font-size: 13px; margin: 14px 0 5px; color: #111; border-bottom: 1px solid #eee; padding-bottom: 3px; }
+  .irscan h3:first-child { margin-top: 0; }
+  .irscan p { margin: 5px 0; }
+  .irscan ul { margin: 5px 0; padding-left: 18px; }
+  .irscan li { margin: 3px 0; }
+  .irscan table { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 11.5px; }
+  .irscan th, .irscan td { text-align: left; padding: 3px 5px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+  .irscan th { color: #666; font-weight: 600; }
+  .irscan td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .irscan .pos { color: #1F7A3E; }
+  .irscan .neg { color: #B33D2E; }
+  .irscan .rate { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px;
+    background: #eef2ff; color: #3730a3; margin-left: 4px; }
+  .irscan .flag { color: #b45309; }
+  .irscan .muted { color: #888; font-style: italic; }
+  .irscan .scanFoot { margin-top: 12px; padding-top: 8px; border-top: 1px solid #eee; font-size: 10.5px; color: #999; }
+  .irNone { padding: 6px 2px; }
   #dirBtns { display: flex; gap: 8px; margin-top: 10px; }
   .mapsBtn { flex: 1; text-align: center; padding: 8px 12px; background: #2563eb; color: #fff !important;
     border-radius: 7px; text-decoration: none; font-size: 13px; }
@@ -358,7 +376,13 @@ function setNote(c, text) {
 
 // --- Company detail popup (Overview / Performance / Contacts), anchored to the pin ---
 let popCompany = null;
-const tvLoaded = { overview: false, perf: false };
+const tvLoaded = { overview: false, perf: false, irscan: false };
+// Tickers that have a committed advisory-fit scan (scans/index.json). Loaded once.
+let scannedTickers = new Set();
+fetch('scans/index.json', { cache: 'no-store' })
+  .then(r => r.ok ? r.json() : [])
+  .then(list => { scannedTickers = new Set((list || []).map(t => String(t).toUpperCase())); })
+  .catch(() => {});
 const companyPopup = L.popup({ maxWidth: 420, className: 'companyPop', autoPanPadding: L.point(40, 40) });
 
 // TradingView wants exchange-qualified symbols where we know the venue.
@@ -441,11 +465,32 @@ function switchTab(name) {
       { symbol: tvSymbol(c), width: '100%', height: 440, displayMode: 'regular',
         isTransparent: true, colorTheme: 'light', locale: 'en' });
   }
+  if (name === 'irscan' && !tvLoaded.irscan) {
+    tvLoaded.irscan = true;
+    loadIrScan(c);
+  }
+}
+
+// IR scans are pre-generated advisory-fit scans committed under scans/<TICKER>.html.
+// Fetch lazily; show a friendly placeholder when a company hasn't been scanned yet.
+function loadIrScan(c) {
+  const pane = document.getElementById('pop-irscan');
+  if (!c.ticker) { pane.innerHTML = `<div class="hint">No ticker — IR scans are keyed by ticker.</div>`; return; }
+  pane.innerHTML = `<div class="hint">Loading IR scan…</div>`;
+  fetch('scans/' + encodeURIComponent(c.ticker.toUpperCase()) + '.html', { cache: 'no-store' })
+    .then(r => { if (!r.ok) throw new Error('nofile'); return r.text(); })
+    .then(html => { pane.innerHTML = `<div class="irscan">${html}</div>`; })
+    .catch(() => {
+      pane.innerHTML =
+        `<div class="irNone"><b>No IR scan yet for ${c.ticker}.</b>` +
+        `<div class="hint">Advisory-fit scans are generated on request. Ask Claude to “scan ${c.ticker}” ` +
+        `and it’ll appear here after the next deploy.</div></div>`;
+    });
 }
 
 function openCompanyPopup(c, at) {
   popCompany = c;
-  tvLoaded.overview = tvLoaded.perf = false;
+  tvLoaded.overview = tvLoaded.perf = tvLoaded.irscan = false;
   const el = document.createElement('div');
   el.innerHTML =
     `<div id="popHead"><h2 id="popName"></h2><div id="popMeta"></div>` +
@@ -454,10 +499,12 @@ function openCompanyPopup(c, at) {
     `<div id="popTabs">` +
     `<button data-tab="overview" class="active">Overview</button>` +
     `<button data-tab="perf">Chart</button>` +
+    `<button data-tab="irscan" id="popIrTab">IR Scan</button>` +
     `<button data-tab="contacts">Contacts</button>` +
     `<button data-tab="notes" id="popNotesTab">Notes</button></div>` +
     `<div class="popPane active" id="pop-overview"></div>` +
     `<div class="popPane" id="pop-perf"></div>` +
+    `<div class="popPane" id="pop-irscan"></div>` +
     `<div class="popPane" id="pop-contacts"></div>` +
     `<div class="popPane" id="pop-notes">` +
     `<textarea id="popNoteText" placeholder="Notes from your visit — who you talked to, follow-ups, impressions…"></textarea>` +
@@ -471,6 +518,9 @@ function openCompanyPopup(c, at) {
   if (center) bits.push(haversineMiles(center.lat, center.lon, c.lat, c.lon).toFixed(1) + ' mi away');
   document.getElementById('popMeta').textContent = bits.join(' · ');
   popStatusBtns();
+  if (c.ticker && scannedTickers.has(c.ticker.toUpperCase())) {
+    document.getElementById('popIrTab').textContent = 'IR Scan ●';
+  }
   buildContacts(c);
   const ta = document.getElementById('popNoteText');
   ta.value = noteOf(c);
