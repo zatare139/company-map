@@ -90,6 +90,9 @@
   #popHead { padding: 12px 14px 8px; border-bottom: 1px solid #eee; }
   #popHead h2 { margin: 0 0 2px; font-size: 16px; padding-right: 14px; }
   #popMeta { font-size: 12px; color: #555; line-height: 1.5; }
+  #popSite { display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 600;
+    color: #2563eb; text-decoration: none; }
+  #popSite:hover { text-decoration: underline; }
   #popTabs { display: flex; border-bottom: 1px solid #e5e7eb; }
   #popTabs button { flex: 1; margin: 0; padding: 8px 4px; background: #fff; color: #555; border: 0;
     border-bottom: 2px solid transparent; border-radius: 0; font-size: 13px; cursor: pointer; }
@@ -385,6 +388,15 @@ fetch('scans/index.json', { cache: 'no-store' })
   .catch(() => {});
 const companyPopup = L.popup({ maxWidth: 420, className: 'companyPop', autoPanPadding: L.point(40, 40) });
 
+// One-tap link to the company's own site: DuckDuckGo's "\" operator jumps
+// straight to the first result (their homepage/IR page), so we never need to
+// store or maintain 16k URLs. Name is lightly cleaned; ticker disambiguates.
+function companyUrl(c) {
+  const name = (c.name || '').replace(/,?\s+(Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|LLC|PLC|Co\.?|Holdings?|Group|N\.V\.|S\.A\.)$/i, '').trim();
+  const q = [name || c.name, c.ticker].filter(Boolean).join(' ');
+  return 'https://duckduckgo.com/?q=' + encodeURIComponent('\\' + q);
+}
+
 // TradingView wants exchange-qualified symbols where we know the venue.
 function tvSymbol(c) {
   const pre = { NYSE: 'NYSE', Nasdaq: 'NASDAQ', OTC: 'OTC' }[c.exchange];
@@ -494,6 +506,7 @@ function openCompanyPopup(c, at) {
   const el = document.createElement('div');
   el.innerHTML =
     `<div id="popHead"><h2 id="popName"></h2><div id="popMeta"></div>` +
+    `<a id="popSite" target="_blank" rel="noopener">&#127760; Company website &#8599;</a>` +
     `<div id="popBtns"><button class="chk" id="popDone"></button>` +
     `<button class="chk grn" id="popRevisit"></button></div></div>` +
     `<div id="popTabs">` +
@@ -517,6 +530,7 @@ function openCompanyPopup(c, at) {
   if (c.mcap != null) bits.push(fmtCap(c.mcap) + ' mkt cap');
   if (center) bits.push(haversineMiles(center.lat, center.lon, c.lat, c.lon).toFixed(1) + ' mi away');
   document.getElementById('popMeta').textContent = bits.join(' · ');
+  document.getElementById('popSite').href = companyUrl(c);
   popStatusBtns();
   if (c.ticker && scannedTickers.has(c.ticker.toUpperCase())) {
     document.getElementById('popIrTab').textContent = 'IR Scan ●';
