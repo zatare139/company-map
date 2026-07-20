@@ -388,14 +388,23 @@ fetch('scans/index.json', { cache: 'no-store' })
   .catch(() => {});
 const companyPopup = L.popup({ maxWidth: 420, className: 'companyPop', autoPanPadding: L.point(40, 40) });
 
-// Link to the company's own site via a Google search — the official site is
-// reliably the top result, so no 16k URLs to store or maintain. Name is lightly
-// cleaned; ticker disambiguates. (DDG's "jump to first result" trick was
-// unreliable — it opened a blank page — so we use a plain, always-working search.)
+// Direct link to the company's own site (c.web, enriched from Yahoo Finance /
+// Wikidata by scripts/enrich_websites.py). Companies with no URL on record fall
+// back to a Google search that surfaces the site as the top result.
 function companyUrl(c) {
+  if (c.web) return c.web;
   const name = (c.name || '').replace(/,?\s+(Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|LLC|PLC|Co\.?|Holdings?|Group|N\.V\.|S\.A\.)$/i, '').trim();
   const q = [name || c.name, c.ticker, 'official website'].filter(Boolean).join(' ');
   return 'https://www.google.com/search?q=' + encodeURIComponent(q);
+}
+
+function companyUrlLabel(c) {
+  if (!c.web) return '\u{1F310} Find company website ↗';
+  try {
+    return '\u{1F310} ' + new URL(c.web).hostname.replace(/^www\./, '') + ' ↗';
+  } catch (e) {
+    return '\u{1F310} Company website ↗';
+  }
 }
 
 // TradingView wants exchange-qualified symbols where we know the venue.
@@ -507,7 +516,7 @@ function openCompanyPopup(c, at) {
   const el = document.createElement('div');
   el.innerHTML =
     `<div id="popHead"><h2 id="popName"></h2><div id="popMeta"></div>` +
-    `<a id="popSite" target="_blank" rel="noopener">&#127760; Find company website &#8599;</a>` +
+    `<a id="popSite" target="_blank" rel="noopener"></a>` +
     `<div id="popBtns"><button class="chk" id="popDone"></button>` +
     `<button class="chk grn" id="popRevisit"></button></div></div>` +
     `<div id="popTabs">` +
@@ -531,7 +540,9 @@ function openCompanyPopup(c, at) {
   if (c.mcap != null) bits.push(fmtCap(c.mcap) + ' mkt cap');
   if (center) bits.push(haversineMiles(center.lat, center.lon, c.lat, c.lon).toFixed(1) + ' mi away');
   document.getElementById('popMeta').textContent = bits.join(' · ');
-  document.getElementById('popSite').href = companyUrl(c);
+  const site = document.getElementById('popSite');
+  site.href = companyUrl(c);
+  site.textContent = companyUrlLabel(c);
   popStatusBtns();
   if (c.ticker && scannedTickers.has(c.ticker.toUpperCase())) {
     document.getElementById('popIrTab').textContent = 'IR Scan ●';
