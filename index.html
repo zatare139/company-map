@@ -388,13 +388,14 @@ fetch('scans/index.json', { cache: 'no-store' })
   .catch(() => {});
 const companyPopup = L.popup({ maxWidth: 420, className: 'companyPop', autoPanPadding: L.point(40, 40) });
 
-// One-tap link to the company's own site: DuckDuckGo's "\" operator jumps
-// straight to the first result (their homepage/IR page), so we never need to
-// store or maintain 16k URLs. Name is lightly cleaned; ticker disambiguates.
+// Link to the company's own site via a Google search — the official site is
+// reliably the top result, so no 16k URLs to store or maintain. Name is lightly
+// cleaned; ticker disambiguates. (DDG's "jump to first result" trick was
+// unreliable — it opened a blank page — so we use a plain, always-working search.)
 function companyUrl(c) {
   const name = (c.name || '').replace(/,?\s+(Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|LLC|PLC|Co\.?|Holdings?|Group|N\.V\.|S\.A\.)$/i, '').trim();
-  const q = [name || c.name, c.ticker].filter(Boolean).join(' ');
-  return 'https://duckduckgo.com/?q=' + encodeURIComponent('\\' + q);
+  const q = [name || c.name, c.ticker, 'official website'].filter(Boolean).join(' ');
+  return 'https://www.google.com/search?q=' + encodeURIComponent(q);
 }
 
 // TradingView wants exchange-qualified symbols where we know the venue.
@@ -506,7 +507,7 @@ function openCompanyPopup(c, at) {
   const el = document.createElement('div');
   el.innerHTML =
     `<div id="popHead"><h2 id="popName"></h2><div id="popMeta"></div>` +
-    `<a id="popSite" target="_blank" rel="noopener">&#127760; Company website &#8599;</a>` +
+    `<a id="popSite" target="_blank" rel="noopener">&#127760; Find company website &#8599;</a>` +
     `<div id="popBtns"><button class="chk" id="popDone"></button>` +
     `<button class="chk grn" id="popRevisit"></button></div></div>` +
     `<div id="popTabs">` +
